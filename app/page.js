@@ -69,7 +69,7 @@ function MatchCard({ p }) {
 }
 
 export default async function Home() {
-  const today = "2022-08-13"; // TEMP: testing with free-tier allowed season
+  const today = new Date().toISOString().slice(0, 10);
   const demoMode = !hasApiKey;
 
   let predictions = [];
