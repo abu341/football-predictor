@@ -6,6 +6,21 @@ import { DEMO_PREDICTIONS } from "../lib/demoData";
 // on every single request — keeps API usage sane on a free-tier key.
 export const revalidate = 3600;
 
+// "Today" is calculated in UK time, not the server's UTC clock. Without
+// this, the site can show yesterday's fixtures for a few hours around
+// midnight — the server's UTC date rolls over later than the UK's local
+// date does (UK is UTC+0 or UTC+1 depending on the time of year), so a
+// plain new Date() reflects the wrong day during that gap.
+function todayInUK() {
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/London",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+  return formatter.format(new Date());
+}
+
 function pct(x) {
   return `${Math.round(x * 100)}%`;
 }
@@ -100,7 +115,7 @@ function MatchCard({ p }) {
 }
 
 export default async function Home() {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayInUK();
   const demoMode = !hasApiKey;
 
   let predictions = [];
