@@ -1,0 +1,157 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  background: #0f1115;
+  color: #e8e8ec;
+}
+
+.wrap {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 24px 16px 60px;
+}
+
+header.top {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+header.top h1 {
+  font-size: 22px;
+  margin: 0;
+}
+
+header.top .date {
+  color: #9aa0ab;
+  font-size: 14px;
+}
+
+.banner {
+  background: #2a2410;
+  border: 1px solid #6b5b1f;
+  color: #f0d878;
+  padding: 10px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  margin-bottom: 20px;
+}
+
+.empty {
+  color: #9aa0ab;
+  padding: 40px 0;
+  text-align: center;
+}
+
+.grid {
+  display: grid;
+  gap: 14px;
+}
+
+.card {
+  background: #171a21;
+  border: 1px solid #262b35;
+  border-radius: 10px;
+  padding: 16px 18px;
+}
+
+.card .row1 {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.card .league {
+  font-size: 12px;
+  color: #9aa0ab;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.card .kickoff {
+  font-size: 12px;
+  color: #9aa0ab;
+}
+
+.card .matchup {
+  font-size: 17px;
+  font-weight: 600;
+  margin-bottom: 10px;
+}
+
+.probs {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.probs .p {
+  flex: 1;
+  background: #10131a;
+  border-radius: 8px;
+  padding: 8px 10px;
+  text-align: center;
+}
+
+.probs .p .label {
+  font-size: 11px;
+  color: #9aa0ab;
+}
+
+.probs .p .val {
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.badges {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.badge {
+  font-size: 11px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-weight: 600;
+}
+
+.badge.high { background: #123822; color: #5fd88a; }
+.badge.medium { background: #2c2a10; color: #e0cf5f; }
+.badge.low { background: #331717; color: #e08080; }
+.badge.value { background: #10233a; color: #6fb3f2; }
+
+.notes {
+  font-size: 13px;
+  color: #b5bac4;
+  margin-top: 4px;
+}
+
+.odds-line {
+  font-size: 12px;
+  color: #7d8492;
+  margin-top: 8px;
+}
+
+footer.methodology {
+  margin-top: 40px;
+  padding-top: 20px;
+  border-top: 1px solid #262b35;
+  font-size: 13px;
+  color: #9aa0ab;
+  line-height: 1.6;
+}
+
+footer.methodology h2 {
+  font-size: 14px;
+  color: #cdd1d9;
+}
