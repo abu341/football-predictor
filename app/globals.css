@@ -142,6 +142,27 @@ header.top .date {
   margin-top: 8px;
 }
 
+.goals-block {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed #262b35;
+  font-size: 13px;
+  color: #cdd1d9;
+}
+
+.goals-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 4px;
+}
+
+.badge.small {
+  font-size: 10px;
+  padding: 2px 7px;
+}
+
 footer.methodology {
   margin-top: 40px;
   padding-top: 20px;
