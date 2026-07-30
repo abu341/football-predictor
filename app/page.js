@@ -1,228 +1,169 @@
-import { TRACKED_LEAGUES, leagueLabel } from "./leagues";
-import {
-  getFixturesByDateAndLeague,
-  getTeamForm,
-  getH2H,
-  getOddsForFixture,
-  getInjuriesForFixture,
-} from "./apiFootball";
-import {
-  summarizeForm,
-  h2hEdge,
-  predictOutcome,
-  blendWithMarket,
-  impliedProbsFromOdds,
-  findValue,
-  confidenceLabel,
-} from "./model";
-import { fetchEloRatingsForDate, lookupElo, eloDiffScaled } from "./clubElo";
-import {
-  expectedGoals,
-  overUnderProb,
-  bttsProb,
-  extractOverUnderOdds,
-  extractBttsOdds,
-  impliedOverUnder,
-  impliedBtts,
-  findTwoWayValue,
-} from "./goalsModel";
+import { hasApiKey } from "../lib/apiFootball";
+import { buildPredictionsForDate } from "../lib/predictions";
+import { DEMO_PREDICTIONS } from "../lib/demoData";
 
-// Free-tier API keys have small daily quotas. Each fixture we fully process
-// costs ~5 requests (home form, away form, h2h, odds, injuries). This cap
-// keeps a single page load from blowing through your day's quota. Raise it
-// if you're on a paid plan.
-const MAX_FIXTURES_TO_PROCESS = 15;
+// Re-run this page's data fetch at most once an hour on reload, instead of
+// on every single request — keeps API usage sane on a free-tier key.
+export const revalidate = 3600;
 
-// Caps how much a handful of missing players can swing the prediction —
-// this is a nudge, not the main signal.
-const MAX_INJURY_SWING = 0.12;
-const INJURY_WEIGHT_PER_PLAYER = 0.03;
-
-// Some competitions' injury data isn't cleanly scoped to a single fixture
-// and can return an implausibly long list (a whole squad's injury history
-// rather than just this match's absentees). Cap the count so a data quirk
-// doesn't make the note say something like "missing 14 players".
-const MAX_PLAUSIBLE_INJURIES = 6;
-
-function extractMatchWinnerOdds(oddsResponse) {
-  try {
-    const bookmakers = oddsResponse[0]?.bookmakers || [];
-    for (const bm of bookmakers) {
-      const bet = bm.bets.find((b) => b.name === "Match Winner");
-      if (bet) {
-        const home = bet.values.find((v) => v.value === "Home");
-        const draw = bet.values.find((v) => v.value === "Draw");
-        const away = bet.values.find((v) => v.value === "Away");
-        if (home && draw && away) {
-          return {
-            home: parseFloat(home.odd),
-            draw: parseFloat(draw.odd),
-            away: parseFloat(away.odd),
-          };
-        }
-      }
-    }
-  } catch {
-    // fall through
-  }
-  return null;
+function pct(x) {
+  return `${Math.round(x * 100)}%`;
 }
 
-function countInjuries(injuriesResponse, teamId) {
-  if (!injuriesResponse) return 0;
-  const count = injuriesResponse.filter((i) => i.team?.id === teamId).length;
-  return Math.min(count, MAX_PLAUSIBLE_INJURIES);
+function MatchCard({ p }) {
+  const best = p.modelProbs
+    ? Object.entries(p.modelProbs).sort((a, b) => b[1] - a[1])[0]
+    : null;
+  const sideLabel = { home: p.homeTeam, draw: "Draw", away: p.awayTeam };
+  const g = p.goals;
+
+  return (
+    <div className="card">
+      <div className="row1">
+        <span className="league">{p.league}</span>
+        <span className="kickoff">{p.kickoff}</span>
+      </div>
+      <div className="matchup">
+        {p.homeTeam} vs {p.awayTeam}
+      </div>
+
+      <div className="probs">
+        <div className="p">
+          <div className="label">{p.homeTeam}</div>
+          <div className="val">{pct(p.modelProbs.home)}</div>
+        </div>
+        <div className="p">
+          <div className="label">Draw</div>
+          <div className="val">{pct(p.modelProbs.draw)}</div>
+        </div>
+        <div className="p">
+          <div className="label">{p.awayTeam}</div>
+          <div className="val">{pct(p.modelProbs.away)}</div>
+        </div>
+      </div>
+
+      <div className="badges">
+        <span
+          className={`badge ${p.confidence.toLowerCase()}`}
+        >
+          {p.confidence} confidence
+        </span>
+        {p.value?.hasValue && (
+          <span className="badge value">
+            Value: {sideLabel[p.value.bestSide]} (+{pct(p.value.bestEdge)} edge)
+          </span>
+        )}
+        {best && (
+          <span className="badge medium">Lean: {sideLabel[best[0]]}</span>
+        )}
+      </div>
+
+      {p.notes && <div className="notes">{p.notes}</div>}
+
+      {p.odds && (
+        <div className="odds-line">
+          Odds — {p.homeTeam} {p.odds.home} · Draw {p.odds.draw} · {p.awayTeam} {p.odds.away}
+        </div>
+      )}
+
+      {g && (
+        <div className="goals-block">
+          <div className="goals-row">
+            <span>Expected goals: {p.homeTeam} {g.xgHome} – {g.xgAway} {p.awayTeam}</span>
+          </div>
+          <div className="goals-row">
+            <span>Over 2.5 goals: <b>{pct(g.over25)}</b> (Under {pct(g.under25)})</span>
+            {g.overValue?.hasValue && (
+              <span className="badge value small">Value: Over 2.5 (+{pct(g.overValue.edge)})</span>
+            )}
+          </div>
+          <div className="goals-row">
+            <span>Both teams to score: <b>{pct(g.bttsYes)}</b> (No {pct(g.bttsNo)})</span>
+            {g.bttsValue?.hasValue && (
+              <span className="badge value small">Value: BTTS Yes (+{pct(g.bttsValue.edge)})</span>
+            )}
+          </div>
+          {g.overUnderOdds && (
+            <div className="odds-line">
+              O/U 2.5 odds — Over {g.overUnderOdds.over} · Under {g.overUnderOdds.under}
+            </div>
+          )}
+          {g.bttsOdds && (
+            <div className="odds-line">
+              BTTS odds — Yes {g.bttsOdds.yes} · No {g.bttsOdds.no}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
-export async function buildPredictionsForDate(date) {
-  const results = [];
+export default async function Home() {
+  const today = new Date().toISOString().slice(0, 10);
+  const demoMode = !hasApiKey;
 
-  // Fetched once for the whole run (ClubElo returns every club's rating for
-  // a date in a single request) rather than per fixture. If this fails —
-  // it's a free community project, not a guaranteed-uptime API — every
-  // match just falls back to the form-based estimate instead of breaking.
-  const eloMap = await fetchEloRatingsForDate(date).catch((err) => {
-    console.error("ClubElo fetch failed, continuing without it:", err.message);
-    return null;
-  });
+  let predictions = [];
+  let loadError = null;
 
-  for (const league of TRACKED_LEAGUES) {
-    if (results.length >= MAX_FIXTURES_TO_PROCESS) break;
-
-    let fixtures;
+  if (demoMode) {
+    predictions = DEMO_PREDICTIONS;
+  } else {
     try {
-      fixtures = await getFixturesByDateAndLeague(date, league.id);
+      predictions = await buildPredictionsForDate(today);
     } catch (err) {
-      console.error(`Failed fixtures for league ${league.id}:`, err.message);
-      continue;
-    }
-    if (!fixtures || fixtures.length === 0) continue;
-
-    for (const fixture of fixtures) {
-      if (results.length >= MAX_FIXTURES_TO_PROCESS) break;
-
-      const homeTeam = fixture.teams.home;
-      const awayTeam = fixture.teams.away;
-
-      try {
-        const [homeFormRaw, awayFormRaw, h2hRaw, oddsRaw, injuriesRaw] = await Promise.all([
-          getTeamForm(homeTeam.id, 12),
-          getTeamForm(awayTeam.id, 12),
-          getH2H(homeTeam.id, awayTeam.id, 10),
-          getOddsForFixture(fixture.fixture.id).catch(() => null),
-          getInjuriesForFixture(fixture.fixture.id).catch(() => null),
-        ]);
-
-        // Home form is judged from the team's OWN home games, away form from
-        // the other team's OWN away games (falls back to all games if there
-        // aren't enough venue-specific ones yet) — blending them together
-        // hides a real home/away split that often matters a lot.
-        const homeForm = summarizeForm(homeFormRaw, homeTeam.id, "home");
-        const awayForm = summarizeForm(awayFormRaw, awayTeam.id, "away");
-        const h2h = h2hEdge(h2hRaw, homeTeam.id, awayTeam.id);
-
-        // Real, opponent-adjusted Elo ratings when both teams can be matched
-        // by name in ClubElo's list — falls back to 0 (no effect) otherwise,
-        // which just means the form-based estimate is used on its own like
-        // before. Smaller/lower-profile clubs often won't match; that's fine.
-        const homeElo = lookupElo(eloMap, homeTeam.name);
-        const awayElo = lookupElo(eloMap, awayTeam.name);
-        const eloDiff = eloDiffScaled(homeElo, awayElo);
-
-        // Missing players nudge — capped so a couple of absences can't
-        // dominate the read the way a real quality gap should.
-        const homeInjuries = countInjuries(injuriesRaw, homeTeam.id);
-        const awayInjuries = countInjuries(injuriesRaw, awayTeam.id);
-        const injuryDiff = Math.max(
-          -MAX_INJURY_SWING,
-          Math.min(MAX_INJURY_SWING, (awayInjuries - homeInjuries) * INJURY_WEIGHT_PER_PLAYER)
-        );
-
-        const rawModelProbs = predictOutcome({ homeForm, awayForm, h2h, eloDiff, injuryDiff });
-        const odds = oddsRaw ? extractMatchWinnerOdds(oddsRaw) : null;
-        const impliedProbs = odds ? impliedProbsFromOdds(odds) : null;
-
-        // Pull the model's read back toward the market's — the market is
-        // usually sharper than a simple form-based heuristic, especially
-        // for one-off cup/qualifier ties recent league form doesn't capture.
-        const modelProbs = blendWithMarket(rawModelProbs, impliedProbs, 0.75);
-        const value = impliedProbs ? findValue(modelProbs, impliedProbs) : null;
-
-        // --- Goals markets: Over/Under 2.5 and Both Teams to Score ---
-        // Reuses the same home/away form already computed above — no extra
-        // API calls needed for the model side of this.
-        const { xgHome, xgAway } = expectedGoals(homeForm, awayForm);
-        const goalsProb = overUnderProb(xgHome, xgAway, 2.5);
-        const bttsProbability = bttsProb(xgHome, xgAway);
-
-        const overUnderOdds = oddsRaw ? extractOverUnderOdds(oddsRaw, "2.5") : null;
-        const bttsOdds = oddsRaw ? extractBttsOdds(oddsRaw) : null;
-        const overUnderImplied = impliedOverUnder(overUnderOdds);
-        const bttsImplied = impliedBtts(bttsOdds);
-
-        const overValue = overUnderImplied
-          ? findTwoWayValue(goalsProb.over, overUnderImplied.over)
-          : null;
-        const bttsValue = bttsImplied
-          ? findTwoWayValue(bttsProbability.yes, bttsImplied.yes)
-          : null;
-
-        const extraNotes = [];
-        if (value?.tooLargeToTrust) {
-          extraNotes.push(
-            "Large gap vs. the market on this one — likely a data/model quirk, not real value. Worth a manual look before trusting it."
-          );
-        }
-        if (homeInjuries + awayInjuries > 0) {
-          extraNotes.push(
-            `${homeTeam.name} missing ${homeInjuries}, ${awayTeam.name} missing ${awayInjuries} (injury/suspension).`
-          );
-        }
-
-        results.push({
-          fixtureId: fixture.fixture.id,
-          league: leagueLabel(league.id),
-          kickoff: new Date(fixture.fixture.date).toLocaleString("en-GB", {
-            weekday: "short",
-            hour: "2-digit",
-            minute: "2-digit",
-          }),
-          homeTeam: homeTeam.name,
-          awayTeam: awayTeam.name,
-          modelProbs,
-          impliedProbs,
-          odds,
-          value,
-          confidence: confidenceLabel(modelProbs),
-          notes: extraNotes.length > 0 ? extraNotes.join(" ") : null,
-          goals: {
-            xgHome,
-            xgAway,
-            over25: goalsProb.over,
-            under25: goalsProb.under,
-            bttsYes: bttsProbability.yes,
-            bttsNo: bttsProbability.no,
-            overUnderOdds,
-            bttsOdds,
-            overValue,
-            bttsValue,
-          },
-        });
-      } catch (err) {
-        console.error(
-          `Failed processing fixture ${fixture.fixture.id}:`,
-          err.message
-        );
-      }
+      loadError = err.message;
     }
   }
 
-  // Highest-confidence / clearest-value picks first.
-  results.sort((a, b) => {
-    const aEdge = a.value?.bestEdge ?? 0;
-    const bEdge = b.value?.bestEdge ?? 0;
-    return bEdge - aEdge;
-  });
+  return (
+    <div className="wrap">
+      <header className="top">
+        <h1>Today&apos;s Football Predictions</h1>
+        <span className="date">{today}</span>
+      </header>
 
-  return results;
+      {demoMode && (
+        <div className="banner">
+          Demo mode — showing sample matches. Add your API_FOOTBALL_KEY in
+          .env.local (see .env.example) to see live predictions for today&apos;s
+          real fixtures.
+        </div>
+      )}
+
+      {loadError && (
+        <div className="banner">
+          Couldn&apos;t load live data: {loadError}
+        </div>
+      )}
+
+      {!demoMode && !loadError && predictions.length === 0 && (
+        <div className="empty">No tracked-league fixtures found for today.</div>
+      )}
+
+      <div className="grid">
+        {predictions.map((p) => (
+          <MatchCard key={p.fixtureId} p={p} />
+        ))}
+      </div>
+
+      <footer className="methodology">
+        <h2>How this works</h2>
+        <p>
+          Each match is scored from recent form (points per game, goals for/against),
+          real Elo club ratings when available, home advantage, head-to-head history,
+          and reported injuries/suspensions, converted into win/draw/loss
+          probabilities. Where odds are available, those probabilities are compared
+          against the bookmaker&apos;s implied probability (with their margin removed)
+          — a &quot;value&quot; badge means the model thinks a side is more likely
+          than the market price suggests, which is the only kind of edge that
+          matters long-run. Expected goals, Over/Under 2.5, and Both Teams to Score
+          come from a simple Poisson goal model using each team&apos;s own scoring
+          and conceding record. This is a heuristic model, not a guarantee: track its
+          real hit rate over time before sizing any bet on it, and treat every
+          confidence label as a probability, not a certainty.
+        </p>
+      </footer>
+    </div>
+  );
 }
