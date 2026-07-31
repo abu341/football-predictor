@@ -1,5 +1,5 @@
 import { hasApiKey } from "../lib/apiFootball";
-import { buildPredictionsForDate, debugLeagueCoverage } from "../lib/predictions";
+import { buildPredictionsForDate } from "../lib/predictions";
 import { DEMO_PREDICTIONS } from "../lib/demoData";
 
 // Re-run this page's data fetch at most once an hour on reload, instead of
@@ -120,7 +120,6 @@ export default async function Home() {
 
   let predictions = [];
   let loadError = null;
-  let leagueDebug = [];
 
   if (demoMode) {
     predictions = DEMO_PREDICTIONS;
@@ -130,7 +129,6 @@ export default async function Home() {
     } catch (err) {
       loadError = err.message;
     }
-    leagueDebug = await debugLeagueCoverage(today).catch(() => []);
   }
 
   return (
@@ -163,33 +161,6 @@ export default async function Home() {
           <MatchCard key={p.fixtureId} p={p} />
         ))}
       </div>
-
-      {leagueDebug.length > 0 && (
-        <div className="debug-panel">
-          <h3>Debug: league coverage for {today}</h3>
-          <p>Temporary — shows why some leagues aren&apos;t appearing above. Remove once done diagnosing.</p>
-          <table>
-            <thead>
-              <tr>
-                <th>League</th>
-                <th>ID</th>
-                <th>Fixtures found</th>
-                <th>Error</th>
-              </tr>
-            </thead>
-            <tbody>
-              {leagueDebug.map((row) => (
-                <tr key={row.id}>
-                  <td>{row.label}</td>
-                  <td>{row.id}</td>
-                  <td>{row.count}</td>
-                  <td>{row.error || "—"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
 
       <footer className="methodology">
         <h2>How this works</h2>
