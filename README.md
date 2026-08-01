@@ -11,17 +11,17 @@ this produces.** It's a starting heuristic model, not a proven system.
 
 ---
 
-## 1. Get a free data API key (~5 minutes)
+## 1. Get an API-Football key — you'll need the Pro plan
 
 This site pulls fixtures, form, head-to-head, and odds from **API-Football**.
+Sign up at https://dashboard.api-football.com/register.
 
-1. Go to https://dashboard.api-football.com/register and create a free account
-   (email + password, no card required for the free tier).
-2. After confirming your email, go to your dashboard — you'll see your API key
-   right there.
-3. The free tier gives you 100 requests/day, which is enough for a handful of
-   matches a day (this site is capped at 15 fixtures per load to stay within
-   that).
+Fixture discovery scans every fixture worldwide for the day and keeps
+whichever ones bookmakers have actually priced (see "How fixtures are
+found" below) — that's roughly 150-200 requests per day. **The free tier
+(100 requests/day, 10/minute) can't cover this**; you need the **Pro plan**
+(7,500 requests/day, 5 requests/second), which is also what the code's rate
+throttling in `lib/apiFootball.js` is tuned for.
 
 (If you'd rather go through RapidAPI instead, that works too — see the notes
 in `.env.example`.)
@@ -46,9 +46,25 @@ npm install
 npm run dev
 ```
 
-Open http://localhost:3000 — you should see today's real fixtures instead of
-the demo banner (on days with matches in one of the tracked leagues; see
-`lib/leagues.js` to add/remove leagues).
+Open http://localhost:3000 — the first real (non-demo) load takes roughly a
+minute, since it's scanning the whole day's worldwide fixture list and
+paging through odds before settling on today's matches (see below). That's
+expected, not a bug — normal usage doesn't hit this path live (step 5).
+
+## How fixtures are found
+
+There's no hand-picked list of leagues. Every fixture worldwide for the day
+is fetched in one request, then only fixtures that bookmakers have actually
+priced are kept — that alone filters out friendlies and most obscure/youth
+leagues, since bookmakers don't bother pricing those. The remaining
+fixtures are ranked by how many bookmakers price them (a proxy for how
+mainstream the match is) and the top ones are fully processed, capped by
+`MAX_FIXTURES_TO_PROCESS` in `lib/predictions.js`.
+
+Odds availability isn't a perfect filter on its own — some bookmakers do
+price reserve/youth leagues occasionally. `lib/leagues.js` holds a small,
+manually-curated `EXCLUDED_LEAGUE_IDS` list as a backstop for exactly that;
+add a league's id there if you spot one that shouldn't be showing up.
 
 ## 4. Make it live (deploy to Vercel — free, no card needed)
 
@@ -62,12 +78,45 @@ the demo banner (on days with matches in one of the tracked leagues; see
    - `API_FOOTBALL_HOST` = `v3.football.api-sports.io`
    - `API_FOOTBALL_KEY` = your real key
 5. Click **Deploy**. A few minutes later you'll have a real URL
-   (something like `football-predictor-yourname.vercel.app`) that you can
-   open on your phone any day and reload for that day's picks.
+   (something like `football-predictor-yourname.vercel.app`).
 
-The page re-fetches fresh data at most once an hour, so reloading during the
-same hour won't waste your API quota — reload the next hour (or next day)
-for updated picks.
+## 5. Turn on the daily archive — needed for normal day-to-day use
+
+Fixture discovery takes on the order of a minute, which is too slow to run
+on every page load. In normal operation, a **daily cron job precomputes
+that day's predictions once** and the live homepage just reads the result
+— instant loads, and it's also what powers `/history`. Skipping this step
+doesn't break the site, but every single page load will fall back to
+computing everything live (~60+ seconds, and it doesn't cache between
+requests), so it's worth doing:
+
+1. In your Vercel project, go to **Storage → Create Database → Blob** and
+   connect it to the project. Vercel automatically adds a
+   `BLOB_READ_WRITE_TOKEN` environment variable for you — no manual copying
+   needed.
+2. Add a `CRON_SECRET` environment variable (any random string — e.g.
+   generate one with `openssl rand -hex 32`). This stops anyone else from
+   calling the archive endpoint and burning your API quota; Vercel
+   automatically sends it back as a Bearer token when *it* triggers the cron.
+3. Check **Project Settings → Functions → Fluid Compute** is enabled (it's
+   the default on newer Vercel projects). The archive route needs up to 60
+   seconds to run, well past Vercel Hobby's normal 10-second limit — Fluid
+   Compute is what allows that on the free plan.
+4. Redeploy. `vercel.json` already defines a daily cron job (00:20 UTC —
+   just after UK midnight in both GMT and BST) that hits `/api/archive` and
+   precomputes that day's predictions. It's scheduled early deliberately:
+   the archive needs to exist for as much of the day as possible so normal
+   daytime traffic gets the fast cached path, not just the last hour before
+   rollover. The trade-off is that odds/injury data is locked in near the
+   start of the day rather than closer to kickoff.
+5. Vercel Hobby (free) plans support one daily cron job, which is exactly
+   what this needs.
+
+Want to test it immediately rather than waiting for the next cron run?
+Visit `/api/archive?date=2026-07-31` yourself (swap in today's date) —
+without `CRON_SECRET` set this works from a browser; with it set you'll need
+to pass the header yourself, e.g.
+`curl -H "Authorization: Bearer <secret>" https://your-site/api/archive`.
 
 ## How the model works (short version)
 

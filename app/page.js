@@ -1,118 +1,24 @@
+import Link from "next/link";
 import { hasApiKey } from "../lib/apiFootball";
 import { buildPredictionsForDate } from "../lib/predictions";
 import { DEMO_PREDICTIONS } from "../lib/demoData";
+import { todayInUK } from "../lib/date";
+import { MatchCard } from "../components/MatchCard";
+import { getArchivedPredictions, hasBlobStore } from "../lib/history";
 
 // Re-run this page's data fetch at most once an hour on reload, instead of
 // on every single request — keeps API usage sane on a free-tier key.
 export const revalidate = 3600;
 
-// "Today" is calculated in UK time, not the server's UTC clock. Without
-// this, the site can show yesterday's fixtures for a few hours around
-// midnight — the server's UTC date rolls over later than the UK's local
-// date does (UK is UTC+0 or UTC+1 depending on the time of year), so a
-// plain new Date() reflects the wrong day during that gap.
-function todayInUK() {
-  const formatter = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Europe/London",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  });
-  return formatter.format(new Date());
-}
-
-function pct(x) {
-  return `${Math.round(x * 100)}%`;
-}
-
-function MatchCard({ p }) {
-  const best = p.modelProbs
-    ? Object.entries(p.modelProbs).sort((a, b) => b[1] - a[1])[0]
-    : null;
-  const sideLabel = { home: p.homeTeam, draw: "Draw", away: p.awayTeam };
-  const g = p.goals;
-
-  return (
-    <div className="card">
-      <div className="row1">
-        <span className="league">{p.league}</span>
-        <span className="kickoff">{p.kickoff}</span>
-      </div>
-      <div className="matchup">
-        {p.homeTeam} vs {p.awayTeam}
-      </div>
-
-      <div className="probs">
-        <div className="p">
-          <div className="label">{p.homeTeam}</div>
-          <div className="val">{pct(p.modelProbs.home)}</div>
-        </div>
-        <div className="p">
-          <div className="label">Draw</div>
-          <div className="val">{pct(p.modelProbs.draw)}</div>
-        </div>
-        <div className="p">
-          <div className="label">{p.awayTeam}</div>
-          <div className="val">{pct(p.modelProbs.away)}</div>
-        </div>
-      </div>
-
-      <div className="badges">
-        <span
-          className={`badge ${p.confidence.toLowerCase()}`}
-        >
-          {p.confidence} confidence
-        </span>
-        {p.value?.hasValue && (
-          <span className="badge value">
-            Value: {sideLabel[p.value.bestSide]} (+{pct(p.value.bestEdge)} edge)
-          </span>
-        )}
-        {best && (
-          <span className="badge medium">Lean: {sideLabel[best[0]]}</span>
-        )}
-      </div>
-
-      {p.notes && <div className="notes">{p.notes}</div>}
-
-      {p.odds && (
-        <div className="odds-line">
-          Odds — {p.homeTeam} {p.odds.home} · Draw {p.odds.draw} · {p.awayTeam} {p.odds.away}
-        </div>
-      )}
-
-      {g && (
-        <div className="goals-block">
-          <div className="goals-row">
-            <span>Expected goals: {p.homeTeam} {g.xgHome} – {g.xgAway} {p.awayTeam}</span>
-          </div>
-          <div className="goals-row">
-            <span>Over 2.5 goals: <b>{pct(g.over25)}</b> (Under {pct(g.under25)})</span>
-            {g.overValue?.hasValue && (
-              <span className="badge value small">Value: Over 2.5 (+{pct(g.overValue.edge)})</span>
-            )}
-          </div>
-          <div className="goals-row">
-            <span>Both teams to score: <b>{pct(g.bttsYes)}</b> (No {pct(g.bttsNo)})</span>
-            {g.bttsValue?.hasValue && (
-              <span className="badge value small">Value: BTTS Yes (+{pct(g.bttsValue.edge)})</span>
-            )}
-          </div>
-          {g.overUnderOdds && (
-            <div className="odds-line">
-              O/U 2.5 odds — Over {g.overUnderOdds.over} · Under {g.overUnderOdds.under}
-            </div>
-          )}
-          {g.bttsOdds && (
-            <div className="odds-line">
-              BTTS odds — Yes {g.bttsOdds.yes} · No {g.bttsOdds.no}
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
+// Fixture discovery (lib/predictions.js) now scans every fixture worldwide
+// and filters by real bookmaker odds, which takes on the order of a minute
+// throttled under API-Football's rate limit — too slow for a normal page
+// render. The daily cron (app/api/archive/route.js) precomputes it once and
+// this page just reads that archive. maxDuration here only matters for the
+// live-compute fallback below (no archive yet — first deploy, or Blob not
+// connected); like the archive route, it needs Fluid Compute to take effect
+// on Vercel Hobby.
+export const maxDuration = 60;
 
 export default async function Home() {
   const today = todayInUK();
@@ -125,7 +31,11 @@ export default async function Home() {
     predictions = DEMO_PREDICTIONS;
   } else {
     try {
-      predictions = await buildPredictionsForDate(today);
+      const archived = hasBlobStore ? await getArchivedPredictions(today) : null;
+      // No archive yet for today (cron hasn't run since midnight, or Blob
+      // isn't connected) — fall back to computing live so the page still
+      // works, just slower than usual for this one load.
+      predictions = archived ? archived.predictions : await buildPredictionsForDate(today);
     } catch (err) {
       loadError = err.message;
     }
@@ -135,7 +45,10 @@ export default async function Home() {
     <div className="wrap">
       <header className="top">
         <h1>Today&apos;s Football Predictions</h1>
-        <span className="date">{today}</span>
+        <nav className="nav">
+          <Link href="/history">History</Link>
+          <span className="date">{today}</span>
+        </nav>
       </header>
 
       {demoMode && (
@@ -153,7 +66,7 @@ export default async function Home() {
       )}
 
       {!demoMode && !loadError && predictions.length === 0 && (
-        <div className="empty">No tracked-league fixtures found for today.</div>
+        <div className="empty">No fixtures with bookmaker odds found for today.</div>
       )}
 
       <div className="grid">
