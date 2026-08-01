@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { revalidatePath } from "next/cache";
 import { hasApiKey } from "../../../lib/apiFootball";
 import { buildPredictionsForDate } from "../../../lib/predictions";
 import { todayInUK } from "../../../lib/date";
@@ -59,6 +60,16 @@ export async function GET(request) {
   try {
     const predictions = await buildPredictionsForDate(date);
     await archiveDate(date, predictions);
+    // Without this, a page already cached (revalidate: 3600) before this
+    // run finished would keep serving its stale version — no archive, or
+    // an older date's — for up to an hour, even though the fresh data is
+    // sitting right there in Blob. Confirmed live: /history cached "no
+    // archives yet" during the ~96s this route was still running, and
+    // without invalidating it explicitly here it would've stayed wrong for
+    // up to an hour after a successful archive.
+    revalidatePath("/");
+    revalidatePath("/history");
+    revalidatePath(`/history/${date}`);
     return NextResponse.json({ ok: true, date, count: predictions.length });
   } catch (err) {
     return NextResponse.json({ error: err.message }, { status: 500 });
