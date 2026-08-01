@@ -16,9 +16,9 @@ export const revalidate = 3600;
 // render. The daily cron (app/api/archive/route.js) precomputes it once and
 // this page just reads that archive. maxDuration here only matters for the
 // live-compute fallback below (no archive yet — first deploy, or Blob not
-// connected); like the archive route, it needs Fluid Compute to take effect
-// on Vercel Hobby.
-export const maxDuration = 60;
+// connected); matches the archive route's 300s ceiling (Vercel Hobby's max
+// with Fluid Compute) for the same reason — 60s wasn't enough in practice.
+export const maxDuration = 300;
 
 export default async function Home() {
   const today = todayInUK();

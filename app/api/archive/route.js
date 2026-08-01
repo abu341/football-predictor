@@ -6,13 +6,17 @@ import { archiveDate, hasBlobStore } from "../../../lib/history";
 
 // Fixture discovery now scans every fixture worldwide for the date and
 // filters by real bookmaker odds (see lib/predictions.js) rather than a
-// curated league list — that's ~150 API-Football requests, throttled to
-// stay under the Pro plan's 5 req/sec cap (lib/apiFootball.js), so a full
-// run takes on the order of a minute. 60s here needs Fluid Compute, which
-// is the default on newer Vercel projects (Project Settings → Functions →
-// "Fluid Compute" if it isn't already on) — without it, Hobby's hard 10s
-// cap would kill this run partway through.
-export const maxDuration = 60;
+// curated league list — that's ~180 API-Football requests, throttled to
+// stay under the Pro plan's 5 req/sec cap (lib/apiFootball.js). Typical
+// runs took 54-70s in testing, but confirmed live in production that 60s
+// isn't always enough (a 504 "Task timed out after 60 seconds" — likely
+// occasional rate-limit retries pushing it over). 300s is the actual ceiling
+// on Vercel Hobby with Fluid Compute (confirmed via Vercel's docs — Hobby
+// without Fluid Compute caps lower), which is the default on newer
+// projects; check Project Settings → Functions → "Fluid Compute" if this
+// still times out. Using the max here costs nothing extra when the run
+// finishes early — Fluid Compute bills actual usage, not the ceiling.
+export const maxDuration = 300;
 
 // Triggered daily by Vercel Cron (see vercel.json — scheduled for just
 // after UK midnight, 00:20 UTC) to precompute that day's predictions once —

@@ -99,9 +99,11 @@ requests), so it's worth doing:
    calling the archive endpoint and burning your API quota; Vercel
    automatically sends it back as a Bearer token when *it* triggers the cron.
 3. Check **Project Settings → Functions → Fluid Compute** is enabled (it's
-   the default on newer Vercel projects). The archive route needs up to 60
-   seconds to run, well past Vercel Hobby's normal 10-second limit — Fluid
-   Compute is what allows that on the free plan.
+   the default on newer Vercel projects). The archive route can take up to
+   a few minutes to run on a busy day — confirmed live that 60 seconds
+   isn't always enough — so it's configured for the full 300-second ceiling
+   Fluid Compute allows on Vercel Hobby. Without Fluid Compute enabled,
+   this will time out.
 4. Redeploy. `vercel.json` already defines a daily cron job (00:20 UTC —
    just after UK midnight in both GMT and BST) that hits `/api/archive` and
    precomputes that day's predictions. It's scheduled early deliberately:
